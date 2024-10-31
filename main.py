@@ -1,11 +1,30 @@
+import logging
 import os
+import sys
 from typing import Annotated
-from fastapi import FastAPI, Depends
+
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.encoders import jsonable_encoder
 from pydantic.dataclasses import dataclass
 
 from database.db import DatabaseController
 
 app = FastAPI()
+
+# TODO: Move logger creation to function and clean up the format
+logger = logging.getLogger("YADB")
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s [%(levelname)s]: %(message)s")
+
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setFormatter(formatter)
+file_handler = logging.FileHandler("info.log")
+file_handler.setFormatter(formatter)
+
+logger.addHandler(stream_handler)
+logger.addHandler(file_handler)
+
+logger.info("API is starting up")
 
 
 @dataclass
@@ -51,13 +70,26 @@ DBConfigs = Annotated[DatabaseConfigs, Depends(db_configs)]
 
 
 @app.get("/posts")
-async def get_all_posts(db_configs: DBConfigs):
+async def get_all_posts(db_configs: DBConfigs, category: str | None = None):
     controller = DatabaseController(db_configs)
-    posts = await controller.get_posts()
+    if category:
+        posts = await controller.get_posts_by_category(category)
+    else:
+        posts = await controller.get_posts()
+    logger.debug(posts)
 
-    return {"Hello": "World"}
+    return jsonable_encoder(posts)
 
 
 @app.get("/posts/{post_id}")
-async def get_one_post(db_configs: DBConfigs):
-    return db_configs
+async def get_one_post(db_configs: DBConfigs, post_id: int):
+    try:
+        int(post_id)
+    except ValueError:
+        logger.exception("post id is not int")
+        raise HTTPException(status_code=400, detail="Invalid Post ID")
+    controller = DatabaseController(db_configs)
+    post = await controller.get_post(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="post not found")
+    return jsonable_encoder(post)
